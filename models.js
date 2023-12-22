@@ -1,4 +1,5 @@
-const mongoose = require("mongoose")
+import { generateToken } from './auth.js';
+import mongoose from "mongoose";
 
 const ItemScheema = new mongoose.Schema({
     item: {
@@ -30,6 +31,11 @@ const ItemScheema = new mongoose.Schema({
         data: {
             type: Date,
             default: null
+        },
+        reservaId: {
+            type: String,
+            default: null,
+            index: true
         }
     }
 }, {strict: false})
@@ -37,11 +43,13 @@ const ItemScheema = new mongoose.Schema({
 ItemScheema.methods.mkReserva = function mkReserva(nome){
     this.reserva.nome = nome
     this.reserva.data = Date.now()
+    this.reserva.reservaId = generateToken();
 }
 
 ItemScheema.methods.rmReserva = function rmReserva(){
     this.reserva.nome = null
     this.reserva.data = null
+    this.reserva.reservaId = null
 }
 
 const Item = mongoose.model('Item', ItemScheema)
@@ -67,4 +75,4 @@ const AdminScheema = new mongoose.Schema({
 
 const Admin = mongoose.model("Admin", AdminScheema)
 
-module.exports = {Item, Admin}
+export {Item, Admin}

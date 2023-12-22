@@ -1,13 +1,15 @@
-const mongoose = require("mongoose");
-const express = require("express");
-const cors = require("cors");
-const Models = require("./models");
-const {checkAdmin, limparReservas, generateToken} = require("./functions.js");
-require('dotenv').config();
+import mongoose from "mongoose";
+import express from "express";
+import cors from "cors";
+import * as Models from "./models.js"; // Assuming ./models.js exports multiple items as named exports
+import { limparReservas, generatePDF } from "./functions.js";
+import { checkAdmin, generateToken } from "./auth.js"
+
+import dotenv from 'dotenv';
+dotenv.config();
 
 // Express
 const app = express();
-const port = 3000;
 app.use(express.json());
 app.use(express.static('public'));
 app.use(cors())
@@ -21,13 +23,13 @@ db.once('open', () => {
     console.log('Connected to MongoDB!');
 });
 
-limparReservas(mongoose);
+limparReservas();
 
 // Rotas
 // 
 app.get('/lista', async (req, res, next) => {
     try {
-        lista = await Models.Item.find({'reserva.nome': null}, {reserva: 0});
+        const lista = await Models.Item.find({'reserva.reservaId': null}, {reserva: 0});
         res.json(lista);
     } catch (err) {
         next(err)
@@ -37,17 +39,14 @@ app.get('/lista', async (req, res, next) => {
 // authkey
 app.post('/listaAdmin', async (req, res, next) => {
     try{
-        data = req.body
+        const data = req.body
 
-        checkAdmin(mongoose, data).then((adminAuth) => {
-            if(!adminAuth){
-                res.status(403).send("Sem autorização");
-            }
-
-            lista = Models.Item.find({"reserva.nome": {$ne: null}}).then((lista) => {
-                res.status(200).send(lista);
-            })
-        })
+        if(await checkAdmin(data)){
+            const lista = await Models.Item.find({"reserva.nome": {$ne: null}})
+            res.status(200).send(lista);
+        } else {
+            res.status(403).send("Sem autorização");
+        }
     } catch (err) {
         next(err)
     }
@@ -56,72 +55,98 @@ app.post('/listaAdmin', async (req, res, next) => {
 // authKey, categoria, tipo, modelo ? qty
 app.post('/register', async (req, res, next) => {
     try {
-        data = req.body;
+        let data = req.body;
 
-        checkAdmin(mongoose, data).then(adminAuth => {
-            if(!adminAuth){
-                res.clearCookie('authKey');
-                res.status(403).send('Invalid Auth Key');
-                return;
-            }
+        if(await checkAdmin(data)){
+            const qty = data.qty || 1;
 
             delete data.authKey;
+            delete data.qty
 
-            var newItem = new Models.Item({...data});
-            console.log(newItem);
-            newItem.save();
-
+            for(let i=0; i<qty; i++){
+                const newItem = new Models.Item({...data});
+                newItem.save();
+            }
+            
             res.status(200).send('Objeto inserido com sucesso!');
-        })
+        } else {
+            res.clearCookie('authKey');
+            res.status(403).send('Invalid Auth Key');
+            return;
+        }
     } catch (err) {
         next(err)
     }   
 })
 
 // nome, objectId
-app.post('/reservar', (req, res, next) => {
+app.post('/reservar', async (req, res, next) => {
     try {
-        data = req.body;
-        if(!data.nome || !data.objectId){
+        const {nome, objectId} = req.body;
+
+        if(!nome || !objectId){
             res.status(403).send('Invadid Reservation');
             return;
         }
 
-        Models.Item.findOne({_id: data.objectId}).then((item) => {
-            if(!item){
-                res.status(404).send('Item não encontrado');
-                return;
-            }
-            if(item.reserva.nome != null){
-                res.status(403).send('Item já reservado');
-                return;
-            }
+        let item = await Models.Item.findOne({'_id': objectId})
 
-            item.mkReserva(data.nome)
-            item.save();
-
-            res.status(200).send('Item reservado com sucesso!');
+        if(!item){
+            res.status(404).send('Item não encontrado');
             return;
-        })
+        }
+
+        if(item.reserva.nome != null){
+            res.status(403).send('Item já reservado');
+            return;
+        }
+
+        item.mkReserva(nome)
+        item.save();
+
+        res.status(200).send('Item reservado com sucesso!');
+        return;
+
     } catch (err) {
         next(err)
+    }
+})
+
+// reservaId
+app.get('/reserva', async (req, res, next) => {
+    try {
+        const { reservaId } = req.query;
+        if(!reservaId){
+            res.status(404).send("Reserva não encontrada.");
+        } else {
+            const item = await Models.Item.findOne({"reserva.reservaId": reservaId})
+            if(!item){
+                res.status(404).send("Reserva não encontrada.");
+            } else {
+                generatePDF(item.reserva).then((pdf) => {
+                    res.setHeader('Content-Type', 'application/pdf');
+                    res.status(200).send(pdf);
+                })
+            }
+        }
+    } catch (err) {
+        next(err);
     }
 })
 
 // authKey
 app.post("/reservas", async (req, res, next) => {
     try {
-        data = req.body;
+        const data = req.body;
 
-        checkAdmin(mongoose, data).then(async (adminAuth) => {
+        checkAdmin(data).then(async (adminAuth) => {
             if(!adminAuth){
                 res.clearCookie('authKey');
                 res.status(403).send('Invalid Auth Key');
                 return;
             }
 
-            lista = lista = await Item.find({'reserva.nome': {$ne: null}});
-
+            const lista = await Models.Item.find({'reserva.nome': {$ne: null}});
             console.log(lista);
 
             res.json(lista);
@@ -155,12 +180,34 @@ app.post("/login", async (req, res, next) => {
     }  
 })
 
+// reservaId // GET não é exatamente o adequado, mas foi usado por comodidade
+app.get("/entregue", async (req, res, next) => {
+    try {
+        if(req.query.reservaId){
+            const reservaId = req.query.reservaId
+            const item = await Models.Item.findOne({"reserva.reservaId": reservaId})
+
+            if(item){
+                await Models.Item.findOneAndDelete({"reserva.reservaId": reservaId})
+                res.status(200).send("Objeto entregue e removido com sucesso!")
+            } else {
+                res.status(400).send("Reserva não encontrada, não existe ou já foi entregue")
+            }
+            
+        } else {
+            res.status(400).send("Fornecer reservaId como parâmetro")
+        }
+    } catch (err) {
+        next(err)
+    }
+})
+
 // Error Handling
 app.use((err, req, res, next) => {
     console.error("Error:", err);
     res.status(500).send("Internal Server Error");
 })
 
-app.listen(port, () => {
-    console.log(`App ouvindo a porta ${port}`);
+app.listen(process.env.PORT, () => {
+    console.log(`App ouvindo a porta ${process.env.PORT}`);
 })

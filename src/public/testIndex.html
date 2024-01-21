@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Dynamic Table</title>
+		<style>
+			table {
+				border-collapse: collapse;
+				width: 100%;
+			}
+			th,
+			td {
+				border: 1px solid #dddddd;
+				text-align: left;
+				padding: 8px;
+			}
+			.selected {
+				background-color: #a0d3ff; /* Change the background color as needed */
+			}
+			button {
+				background: none;
+				border: none;
+				cursor: pointer;
+				padding: 0;
+				text-align: left;
+			}
+		</style>
+	</head>
+	<body>
+		<label for="tipoFilter">Filtrar:</label>
+		<select id="tipoFilter" onchange="filterTable()">
+			<option value="all">Todos</option>
+			<option value="armazenamento">Armazenamento</option>
+			<option value="cooler">Cooler</option>
+			<option value="fonte">Fonte</option>
+			<option value="gabinete">Gabinete</option>
+			<option value="memoria">Memoria</option>
+			<option value="mobo">Mobo</option>
+			<option value="mouse">Mouse</option>
+			<option value="processador">Processador</option>
+			<option value="teclado">Teclado</option>
+			<option value="outro">Outro</option>
+		</select>
+
+		<table id="itemTable">
+			<thead>
+				<tr>
+					<th>Categoria</th>
+					<th>Tipo</th>
+					<th>Modelo</th>
+					<th>Added At</th>
+				</tr>
+			</thead>
+			<tbody></tbody>
+		</table>
+
+		<!-- Form for Reservar -->
+		<form id="reservarForm">
+			<label for="nome">Nome:</label>
+			<input type="text" id="nome" name="nome" required />
+
+			<input type="hidden" id="objectId" name="objectId" />
+
+			<button type="submit">Reservar</button>
+		</form>
+
+		<script>
+			document.addEventListener("DOMContentLoaded", () => {
+				fetch("http://localhost:3000/lista")
+					.then((response) => response.json())
+					.then((data) => populateTable(data));
+			});
+
+			function populateTable(items) {
+				const tableBody = document.querySelector("#itemTable tbody");
+				tableBody.innerHTML = "";
+
+				items.forEach((item) => {
+					const row = document.createElement("tr");
+					row.setAttribute("data-id", item._id); // Set a data attribute for the item id
+					row.setAttribute("onclick", `prepareReservar('${item._id}', this)`);
+					row.innerHTML = `
+      <td>${item.item.categoria}</td>
+      <td>${item.item.tipo}</td>
+      <td>${item.item.modelo}</td>
+      <td>${new Date(item.item.addedAt).toLocaleDateString()}</td>
+    `;
+					tableBody.appendChild(row);
+				});
+			}
+
+			function filterTable() {
+				const tipoFilter = document.getElementById("tipoFilter").value;
+				fetch("http://localhost:3000/lista")
+					.then((response) => response.json())
+					.then((data) => {
+						const filteredItems =
+							tipoFilter === "all" ? data : data.filter((item) => item.item.tipo === tipoFilter);
+						populateTable(filteredItems);
+					});
+			}
+
+			function prepareReservar(objectId, row) {
+				// Remove the 'selected' class from all rows
+				document.querySelectorAll("#itemTable tbody tr").forEach((r) => {
+					r.classList.remove("selected");
+				});
+
+				// Add the 'selected' class to the clicked row
+				row.classList.add("selected");
+
+				// Set the objectId in the form
+				document.getElementById("objectId").value = objectId;
+			}
+
+			document.getElementById("reservarForm").addEventListener("submit", function (event) {
+				event.preventDefault();
+				const nome = document.getElementById("nome").value;
+				const objectId = document.getElementById("objectId").value;
+
+				fetch("/reservar", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+					},
+					body: JSON.stringify({ nome, objectId }),
+				})
+					.then((response) => response.text())
+					.then((message) => alert(message))
+					.catch((error) => console.error(error));
+			});
+		</script>
+	</body>
+</html>
